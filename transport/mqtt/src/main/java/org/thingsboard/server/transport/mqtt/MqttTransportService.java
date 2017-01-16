@@ -15,15 +15,16 @@
  */
 package org.thingsboard.server.transport.mqtt;
 
+import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
-import io.netty.handler.ssl.SslHandler;
 import io.netty.util.ResourceLeakDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,8 +37,9 @@ import org.thingsboard.server.transport.mqtt.adaptors.MqttTransportAdaptor;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
-import javax.net.ssl.SSLEngine;
-import java.util.concurrent.Executor;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * @author Andrew Shvayka
@@ -74,16 +76,27 @@ public class MqttTransportService {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
 
+    @Value("${mqtt.startLocalServer}")
+    private boolean startMQTTServer;
+
     @PostConstruct
     public void init() throws Exception {
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.ADVANCED);
         log.info("Starting MQTT transport...");
         log.info("Lookup MQTT transport adaptor {}", adaptorName);
         this.adaptor = (MqttTransportAdaptor) appContext.getBean(adaptorName);
-
-        log.info("Starting MQTT transport server");
-        bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
+
+        if(startMQTTServer) {
+            setupServer(host,port);
+        } else {
+            setupClient(host, port);
+        }
+    }
+
+    private void setupServer(String host, int port) throws InterruptedException {
+        log.info("Starting MQTT transport server on "+host+":"+port+"");
+        bossGroup = new NioEventLoopGroup(1);
         ServerBootstrap b = new ServerBootstrap();
         b.group(bossGroup, workerGroup)
                 .channel(NioServerSocketChannel.class)
@@ -91,7 +104,27 @@ public class MqttTransportService {
                 .childHandler(new MqttTransportServerInitializer(processor, authService, adaptor, sslHandlerProvider));
 
         serverChannel = b.bind(host, port).sync().channel();
-        log.info("Mqtt transport started!");
+        log.info("Mqtt server transport started!");
+    }
+
+    // Borrowed from https://github.com/maydemirx/moquette-mqtt/blob/master/broker/src/test/java/org/dna/mqtt/moquette/testclient/Client.java
+    private Channel m_channel;
+    public void setupClient(String host, int port) {
+        log.info("Starting MQTT transport, connecting to server("+host+":"+port+")");
+        try {
+            Bootstrap b = new Bootstrap();
+            b.group(workerGroup)
+                    .channel(NioSocketChannel.class)
+                    .option(ChannelOption.SO_KEEPALIVE, true)
+                    .handler(new MqttTransportServerInitializer(processor, authService, adaptor, sslHandlerProvider));
+
+            m_channel = b.connect(host, port).sync().channel();
+        } catch (Exception ex) {    
+            log.error("Error received in client setup", ex);
+            workerGroup.shutdownGracefully();
+        }
+        log.info("Mqtt client transport started!");
+
     }
 
     @PreDestroy

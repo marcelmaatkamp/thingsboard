@@ -75,6 +75,7 @@ mqtt:
   bind_port: "${MQTT_BIND_PORT:1883}"
   adaptor: "${MQTT_ADAPTOR_NAME:JsonMqttAdaptor}"
   timeout: "${MQTT_TIMEOUT:10000}"
+  startLocalServer: "${MQTT_START_LOCAL_SERVER:true}"
 # Uncomment the following lines to enable ssl for MQTT
 #  ssl:
 #    key-store: keystore/mqttserver.jks
